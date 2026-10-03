@@ -31,9 +31,10 @@ export function validatedData(v,previous){
   if(ids.has(iid))throw new Error('Hay una factura duplicada.');ids.add(iid);
   if(issued(i)){const key=number.toLocaleLowerCase('es');if(numbers.has(key))throw new Error('Hay un número de factura duplicado.');numbers.add(key);}
   if(existed&&issued(existed)){
-   const allKeys=new Set([...Object.keys(existed),...Object.keys(i)]);allKeys.delete('paid');
+   const allKeys=new Set([...Object.keys(existed),...Object.keys(i)]);allKeys.delete('paid');allKeys.delete('deletedAt');
    for(const key of allKeys)if(!sameValue(i[key],existed[key]))throw new Error('Una factura emitida no se puede modificar. Usa «Devolución / rectificar».');
-   return {...existed,paid:!!i.paid};
+   const deletedAt=text(i.deletedAt??'',40);
+   return {...existed,paid:!!i.paid,...(('deletedAt' in existed||deletedAt)?{deletedAt}:{})};
   }
   if(!date(i.date)||(i.operationDate&&!date(i.operationDate)))throw new Error('Revisa las fechas.');
   const status=i.status??'issued',kind=i.kind??'invoice',amountMode=i.amountMode??'total';
@@ -50,13 +51,13 @@ export function validatedData(v,previous){
    vatCents=amountMode==='base'?Math.round(baseCents*i.rate/100):i.totalCents-baseCents;
    if(baseCents+vatCents!==i.totalCents)throw new Error('El total no coincide con la base y el IVA.');
   }
-  const deletedAt=text(i.deletedAt??'',40);if(deletedAt&&status!=='draft')throw new Error('Solo puedes borrar borradores.');
+  const deletedAt=text(i.deletedAt??'',40);
   const result={id:iid,number,date:i.date,operationDate:i.operationDate||'',description:text(i.description,1500,true),notes:text(i.notes??'',1200),owner:owner(i.owner),client:client(i.client),totalCents:i.totalCents,rate:i.rate,baseCents,vatCents,amountMode,paid:status==='draft'?false:!!i.paid,createdAt:existed?.createdAt||text(i.createdAt,40,true),status,kind,deletedAt,issuedAt:status==='issued'?(i.issuedAt||new Date().toISOString()):'',rectifiesId:kind==='credit'?text(i.rectifiesId,100,true):'',rectifiesNumber:kind==='credit'?text(i.rectifiesNumber,50,true):'',rectifiesDate:kind==='credit'?text(i.rectifiesDate,10,true):'',reason:kind==='credit'?text(i.reason,800,true):''};
   if(kind==='credit'&&!number.startsWith('R-'))throw new Error('Las rectificativas usan la serie R-.');
   return result;
  });
- for(const id of old.keys())if(!ids.has(id))throw new Error('No se pueden eliminar facturas guardadas de la copia. Usa la papelera para los borradores.');
- for(const i of invoices.filter(i=>i.kind==='credit'&&!i.deletedAt)){
+ for(const id of old.keys())if(!ids.has(id))throw new Error('No se pueden eliminar facturas guardadas de la copia. Usa la papelera.');
+ for(const i of invoices.filter(i=>i.kind==='credit'&&(issued(i)||!i.deletedAt))){
   const original=invoices.find(o=>o.id===i.rectifiesId);
   if(!original||!issued(original)||original.kind==='credit'||original.rate!==i.rate||original.number!==i.rectifiesNumber||original.date!==i.rectifiesDate||!sameValue(original.owner,i.owner)||!sameValue(original.client,i.client))throw new Error('La devolución debe identificar su factura original y conservar sus datos fiscales.');
   const balance=remainingAmounts(original,invoices,i.id);

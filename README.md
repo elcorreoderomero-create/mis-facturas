@@ -16,7 +16,7 @@ En iPhone o iPad, abrir el enlace en Safari y elegir Compartir → Añadir a pan
 
 ## Documentos
 
-Los borradores se pueden modificar, mover a la papelera y recuperar. Al emitir una factura se conserva su contenido. Las devoluciones completas o parciales generan una rectificativa de la serie R, vinculada a la original. Los PDF de borradores están identificados como documentos no emitidos.
+Los borradores se pueden modificar, mover a la papelera y recuperar. Las facturas emitidas también se pueden eliminar de la lista y recuperar desde «Papelera». Se conserva su contenido, su número no se reutiliza y sus importes siguen incluidos en el resumen. Moverlas a la papelera no anula sus importes. Las devoluciones completas o parciales generan una rectificativa de la serie R, vinculada a la original. Los PDF de borradores están identificados como documentos no emitidos.
 
 ## Datos privados
 
