@@ -6,7 +6,11 @@ El programa público no contiene datos de clientes, facturas, datos fiscales ni 
 
 ## Estado
 
-La conexión con Firebase está pendiente de completar. `firebase-config.js` permanece vacío y la aplicación no permite guardar hasta configurarlo. Publicar estos archivos no activa por sí solo la sincronización.
+Firebase está vinculado y el acceso con Google está configurado. Para completar la puesta en marcha faltan la base de datos con sus reglas privadas, el dominio autorizado y la publicación de GitHub Pages. Publicar estos archivos no activa por sí solo la sincronización.
+
+## Documentos
+
+Los borradores se pueden modificar, mover a la papelera y recuperar. Al emitir una factura se conserva su contenido. Las devoluciones completas o parciales generan una rectificativa en la serie R, vinculada a la factura original. Los PDF de borradores están identificados como documentos no emitidos.
 
 ## Despliegue
 

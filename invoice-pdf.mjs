@@ -19,9 +19,13 @@ export async function invoicePDF(i){
  const top=y;
  const nameLines=wrap(i.owner.name,310,20,bold);for(const row of nameLines){draw(row,M,y,20,bold);y-=25;}y-=6;
  for(const value of ['NIF: '+i.owner.taxId,i.owner.address,i.owner.city,i.owner.country,i.owner.email,i.owner.phone])if(value)paragraph(value,320,10);
- right('FACTURA',W-M,top,22,bold);right(i.number,W-M,top-38,12,bold);right('Fecha: '+date(i.date),W-M,top-61,10);
+ right(i.status==='draft'?'BORRADOR':'FACTURA',W-M,top,i.kind==='credit'?14:22,bold);
+ if(i.kind==='credit')right('RECTIFICATIVA',W-M,top-18,14,bold);
+ right(i.number,W-M,top-38,12,bold);right('Fecha: '+date(i.date),W-M,top-61,10);
  if(i.operationDate&&i.operationDate!==i.date)right('Operación: '+date(i.operationDate),W-M,top-78,10);
  y=Math.min(y,top-110)-20;page.drawLine({start:{x:M,y},end:{x:W-M,y},thickness:.8,color:line});y-=22;
+ if(i.status==='draft'){paragraph('BORRADOR · No es una factura emitida',usable,11,bold);y-=12;}
+ if(i.kind==='credit'){paragraph('Rectifica la factura '+i.rectifiesNumber+' de '+date(i.rectifiesDate),usable,11,bold);paragraph('Motivo: '+i.reason);paragraph('Rectificación por diferencias: devolución del importe indicado.');y-=15;}
  draw('FACTURAR A',M,y,9,bold,muted);y-=23;paragraph(i.client.name,usable,12,bold);paragraph('NIF: '+i.client.taxId);paragraph(i.client.address);y-=25;
  ensure(65);page.drawRectangle({x:M,y:y-29,width:usable,height:29,color:ink});draw('Concepto / servicio',M+10,y-8,10,bold,white);right('Cant.',W-M-145,y-8,9,bold,white);right('Precio sin IVA',W-M-69,y-8,9,bold,white);right('Base',W-M-10,y-8,9,bold,white);y-=43;
  const descriptionTop=y;const descLines=wrap(i.description,usable-220,10);

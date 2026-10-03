@@ -1,4 +1,5 @@
 import {blankData,createDataStore,mergeBackup} from "./data-store.mjs";
+import {remainingAmounts,refundAmounts} from "./invoice-data.mjs";
 
 'use strict';
 const STORE='mis-facturas-nube-v1',root=document.getElementById('root');
@@ -12,7 +13,7 @@ const today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMon
 const dateText=d=>{if(!/^\d{4}-\d{2}-\d{2}$/.test(d||''))return '';return d.split('-').reverse().join('/');};
 const id=()=>globalThis.crypto?.randomUUID?.()||`${Date.now()}-${Math.random().toString(36).slice(2)}`;
 function validDate(s){if(typeof s!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(s))return false;const d=new Date(s+'T12:00:00Z');return Number.isFinite(d.getTime())&&d.toISOString().slice(0,10)===s;}
-function validData(d){return !!d&&d.version===1&&Number.isInteger(d.revision)&&d.revision>=0&&d.owner&&typeof d.owner.name==='string'&&Array.isArray(d.clients)&&Array.isArray(d.invoices)&&d.clients.length<100000&&d.invoices.length<100000&&d.clients.every(c=>c&&typeof c.id==='string'&&typeof c.name==='string')&&d.invoices.every(i=>i&&typeof i.id==='string'&&typeof i.number==='string'&&validDate(i.date)&&i.owner&&typeof i.owner.name==='string'&&i.client&&typeof i.client.name==='string'&&typeof i.description==='string'&&Number.isSafeInteger(i.totalCents)&&i.totalCents>=0&&Number.isFinite(i.rate)&&i.rate>=0&&i.rate<=100&&Number.isSafeInteger(i.baseCents)&&Number.isSafeInteger(i.vatCents)&&i.baseCents+i.vatCents===i.totalCents);}
+function validData(d){return !!d&&d.version===1&&Number.isInteger(d.revision)&&d.revision>=0&&d.owner&&typeof d.owner.name==='string'&&Array.isArray(d.clients)&&Array.isArray(d.invoices)&&d.clients.length<100000&&d.invoices.length<100000&&d.clients.every(c=>c&&typeof c.id==='string'&&typeof c.name==='string')&&d.invoices.every(i=>i&&typeof i.id==='string'&&typeof i.number==='string'&&validDate(i.date)&&i.owner&&typeof i.owner.name==='string'&&i.client&&typeof i.client.name==='string'&&typeof i.description==='string'&&Number.isSafeInteger(i.totalCents)&&(i.totalCents>=0||i.kind==='credit')&&Number.isFinite(i.rate)&&i.rate>=0&&i.rate<=100&&Number.isSafeInteger(i.baseCents)&&Number.isSafeInteger(i.vatCents)&&i.baseCents+i.vatCents===i.totalCents);}
 function parseAmount(value){let v=String(value).trim().replace(/[\s€]/g,'');if(v.includes(',')){if(v.split(',').length!==2)return null;v=v.replace(/\./g,'').replace(',','.');}if(!/^\d+(\.\d{1,2})?$/.test(v))return null;const parts=v.split('.'),c=Number(parts[0])*100+Number((parts[1]||'').padEnd(2,'0'));return Number.isSafeInteger(c)&&c<=99999999999?c:null;}
 function calculate(cents,rate,mode='total'){
  if(!Number.isSafeInteger(cents)||cents<0||!Number.isFinite(rate)||rate<0||rate>100||!['total','base'].includes(mode))return null;
@@ -53,7 +54,122 @@ function backupPage(){return `<header class="top no-print"><div><h1>Copia y ayud
 function download(blob,name){const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),5000);}
 function portableHTML(){return '';}
 function saveBackup(){download(new Blob([JSON.stringify({...data,draft:null},null,2)],{type:'application/json'}),`Mis_facturas_${today()}.json`);toast('Copia de datos preparada para descargar.');}
-function bind(){if($('import-json'))$('import-json').onchange=e=>importBackup(e.target.files[0]);root.querySelectorAll('[data-nav]').forEach(b=>b.onclick=()=>navigate(b.dataset.nav));root.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>{selected=b.dataset.view;page='detail';render();});root.querySelectorAll('[data-edit-client]').forEach(b=>b.onclick=()=>openClient(b.dataset.editClient));root.querySelectorAll('[data-action]').forEach(b=>b.onclick=async()=>{try{const a=b.dataset.action;if(busy)return toast('Espera a que termine el guardado.');if(a==='logout')return await logout();if(a==='pdf')return await downloadPDF(b);if(a==='new')navigate('new');if(a==='add-client')openClient();if(a==='backup-now')saveBackup();if(a==='refresh')await refreshData();if(a==='print'){const i=data.invoices.find(i=>i.id===selected),old=document.title;document.title=`Factura_${i.number}_${i.client.name}`;window.print();document.title=old;}if(a==='toggle-paid'){await saveCloud({...data,invoices:data.invoices.map(i=>i.id===selected?{...i,paid:!i.paid}:i)});render();}if(a==='duplicate'){const i=data.invoices.find(i=>i.id===selected);if(draft&&!confirm('Ya hay un borrador. ¿Quieres sustituirlo por esta copia?'))return;draft=draftFromInvoice(i);page='new';render();}}catch(e){b.disabled=false;toast(e.message||'No se ha podido completar. Inténtalo de nuevo.');}});if($('invoice-form')){$('invoice-form').onsubmit=saveInvoice;$('invoice-form').oninput=()=>{readDraft();updateTotals();};$('invoice-form').onchange=()=>{readDraft();updateTotals();};$('total').setAttribute('inputmode','decimal');}if($('owner-form'))$('owner-form').onsubmit=async e=>{e.preventDefault();const next=Object.fromEntries([...new FormData($('owner-form')).entries()].map(([k,v])=>[k,v.trim()]));try{await saveCloud({...data,owner:next});render();toast('Datos guardados para las nuevas facturas.');}catch(err){toast(err.message);}};if($('search'))$('search').oninput=e=>{filter=e.target.value;$('invoice-list').innerHTML=invoiceRows();$('invoice-list').querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>{selected=b.dataset.view;page='detail';render();});};if($('status-filter'))$('status-filter').onchange=e=>{statusFilter=e.target.value;render();};}
+function bind(){if($('import-json'))$('import-json').onchange=e=>importBackup(e.target.files[0]);root.querySelectorAll('[data-nav]').forEach(b=>b.onclick=()=>navigate(b.dataset.nav));root.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>{selected=b.dataset.view;page='detail';render();});root.querySelectorAll('[data-edit-client]').forEach(b=>b.onclick=()=>openClient(b.dataset.editClient));root.querySelectorAll('[data-action]').forEach(b=>b.onclick=async()=>{try{const a=b.dataset.action;if(busy)return toast('Espera a que termine el guardado.');if(a==='logout')return await logout();if(a==='pdf')return await downloadPDF(b);if(a==='new')navigate('new');if(a==='add-client')openClient();if(a==='backup-now')saveBackup();if(a==='refresh')await refreshData();if(a==='print'){const i=data.invoices.find(i=>i.id===selected),old=document.title;document.title=`Factura_${i.number}_${i.client.name}`;window.print();document.title=old;}if(a==='toggle-paid'){await saveCloud({...data,invoices:data.invoices.map(i=>i.id===selected?{...i,paid:!i.paid}:i)});render();}if(a==='duplicate'){const i=data.invoices.find(i=>i.id===selected);if(draft&&!await confirmAction('Ya hay un borrador. ¿Quieres sustituirlo por esta copia?'))return;draft=draftFromInvoice(i);page='new';render();}}catch(e){b.disabled=false;toast(e.message||'No se ha podido completar. Inténtalo de nuevo.');}});if($('invoice-form')){$('invoice-form').onsubmit=saveInvoice;$('invoice-form').oninput=()=>{readDraft();updateTotals();};$('invoice-form').onchange=()=>{readDraft();updateTotals();};$('total').setAttribute('inputmode','decimal');}if($('owner-form'))$('owner-form').onsubmit=async e=>{e.preventDefault();const next=Object.fromEntries([...new FormData($('owner-form')).entries()].map(([k,v])=>[k,v.trim()]));try{await saveCloud({...data,owner:next});render();toast('Datos guardados para las nuevas facturas.');}catch(err){toast(err.message);}};if($('search'))$('search').oninput=e=>{filter=e.target.value;$('invoice-list').innerHTML=invoiceRows();$('invoice-list').querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>{selected=b.dataset.view;page='detail';render();});};if($('status-filter'))$('status-filter').onchange=e=>{statusFilter=e.target.value;render();};}
+
+const issued=i=>i.status!=='draft';
+let pendingConfirmation=null;
+function confirmAction(message){
+ return new Promise(resolve=>{
+  const dialog=$('confirm-dialog');
+  const finish=value=>{dialog.close();pendingConfirmation=null;resolve(value);};
+  pendingConfirmation=()=>finish(false);
+  dialog.innerHTML=`<section class="card"><h2>Confirmar</h2><p>${esc(message)}</p><div class="actions"><button id="confirm-cancel">Cancelar</button><button id="confirm-ok" class="primary">Confirmar</button></div></section>`;
+  $('confirm-cancel').onclick=()=>finish(false);$('confirm-ok').onclick=()=>finish(true);
+  dialog.oncancel=e=>{e.preventDefault();finish(false);};dialog.showModal();
+ });
+}
+const activeInvoices=()=>data.invoices.filter(i=>!i.deletedAt);
+function numbered(kind='invoice'){
+ const prefix=(kind==='credit'?'R-':'')+today().slice(0,4)+'-';let n=0;
+ for(const i of data.invoices.filter(issued))if(i.number.startsWith(prefix)&&/^\d+$/.test(i.number.slice(prefix.length)))n=Math.max(n,Number(i.number.slice(prefix.length)));
+ return prefix+String(n+1).padStart(3,'0');
+}
+const initialDraftV1=initialDraft;
+initialDraft=()=>({...initialDraftV1(),number:numbered(),kind:'invoice',editId:'',rectifiesId:'',reason:''});
+readDraft=()=>{if(!$('invoice-form'))return;draft={...draft,...Object.fromEntries(new FormData($('invoice-form')).entries())};try{sessionStorage.setItem(draftKey(),JSON.stringify(draft));}catch(e){}};
+const newPageV1=newPage;
+newPage=()=>{
+ let html=newPageV1();
+ html=html.replace('<button class="primary" type="submit">Guardar factura</button>','<button type="submit" data-save="draft">Guardar borrador</button><button class="primary" type="submit" data-save="issued">Emitir factura</button>');
+ html=html.replace('La factura conservará estos datos aunque después cambies un cliente o tus datos personales.','Un borrador se puede modificar o borrar. Al emitir, se conserva la factura y las devoluciones se hacen con una rectificativa.');
+ if(draft.editId)html=html.replace('<h1>Nueva factura</h1>','<h1>Modificar borrador</h1>');
+ if(draft.kind==='credit'){
+  const original=data.invoices.find(i=>i.id===draft.rectifiesId);
+  html=html.replace('<h1>Nueva factura</h1>','<h1>Devolución / rectificativa</h1>').replace('<h1>Modificar borrador</h1>','<h1>Modificar rectificativa</h1>');
+  html=html.replace('<div class="step">1. DATOS DE LA FACTURA</div>',`<div class="notice">Rectifica la factura <strong>${esc(original?.number)}</strong>. Introduce el importe que devuelves en positivo; el PDF lo reflejará en negativo.</div><label for="reason">Motivo de la rectificación</label><textarea id="reason" name="reason" required maxlength="800">${esc(draft.reason)}</textarea><div class="step" style="margin-top:20px">1. DATOS DE LA RECTIFICATIVA</div>`);
+  html=html.replace('name="clientId" required','name="clientId" required disabled').replace('name="rate">','name="rate" disabled>');
+  html=html.replace('Emitir factura</button>','Emitir rectificativa</button>');
+ }
+ return html;
+};
+const updateTotalsV1=updateTotals;
+updateTotals=()=>{
+ updateTotalsV1();if(draft?.kind!=='credit')return;
+ const original=data.invoices.find(i=>i.id===draft.rectifiesId),amount=parseAmount($('total')?.value||'');
+ try{const calc=refundAmounts(original,data.invoices,amount,$('amountMode')?.value||'total',draft.editId);for(const [element,key]of [['calc-base','baseCents'],['calc-vat','vatCents'],['calc-total','totalCents']])$(element).textContent=money(calc[key]);}
+ catch(e){for(const name of ['calc-base','calc-vat','calc-total'])if($(name))$(name).textContent='—';}
+};
+saveInvoice=async e=>{
+ e.preventDefault();readDraft();
+ const fail=message=>{$('form-error').innerHTML=`<div class="error">${esc(message)}</div>`;$('form-error').scrollIntoView({block:'center'});};
+ try{
+  const amount=parseAmount(draft.total),status=e.submitter?.dataset.save==='issued'?'issued':'draft';
+  if(amount===null)throw new Error('Escribe un importe válido con hasta dos decimales.');
+  const original=draft.kind==='credit'?data.invoices.find(i=>i.id===draft.rectifiesId):null;
+  const previous=draft.editId?data.invoices.find(i=>i.id===draft.editId):null;
+  if(draft.editId&&(!previous||issued(previous)||previous.deletedAt))throw new Error('Este borrador ha cambiado. Actualiza los datos para continuar.');
+  const client=original?.client||data.clients.find(c=>c.id===draft.clientId);
+  if(!client)throw new Error('Selecciona un cliente.');
+  if(!validDate(draft.date)||!draft.description.trim())throw new Error('Completa la fecha y el concepto.');
+  const amountMode=draft.amountMode||'total',rate=original?.rate??Number(draft.rate);
+  const amounts=original?refundAmounts(original,data.invoices,amount,amountMode,draft.editId):calculate(amount,rate,amountMode);
+  if(!amounts)throw new Error('Revisa el importe.');
+  const invoice={id:previous?.id||id(),number:draft.number.trim(),date:draft.date,operationDate:draft.operationDate||'',description:draft.description.trim(),notes:draft.notes?.trim()||'',owner:{...(original?.owner||data.owner)},client:{...client},...amounts,rate,amountMode,paid:false,createdAt:previous?.createdAt||new Date().toISOString(),status,kind:original?'credit':'invoice',deletedAt:'',issuedAt:status==='issued'?new Date().toISOString():'',rectifiesId:original?.id||'',rectifiesNumber:original?.number||'',rectifiesDate:original?.date||'',reason:original?draft.reason?.trim()||'':''};
+  await saveCloud({...data,invoices:previous?data.invoices.map(i=>i.id===previous.id?invoice:i):[...data.invoices,invoice]});
+  draft=null;sessionStorage.removeItem(draftKey());selected=invoice.id;page='detail';render();toast(status==='draft'?'Borrador guardado. Puedes modificarlo o borrarlo.':'Factura emitida y guardada.');
+ }catch(err){fail(err.message);}
+};
+async function editSavedDraft(invoice){
+ if(issued(invoice)||invoice.deletedAt)return;
+ if(draft&&!await confirmAction('Hay otro formulario sin terminar. ¿Sustituirlo por este borrador?'))return;
+ draft={...draftFromInvoice(invoice),number:invoice.number,date:invoice.date,operationDate:invoice.operationDate,editId:invoice.id,kind:invoice.kind||'invoice',rectifiesId:invoice.rectifiesId||'',reason:invoice.reason||'',total:(Math.abs(invoice.amountMode==='base'?invoice.baseCents:invoice.totalCents)/100).toFixed(2).replace('.',',')};
+ page='new';render();readDraft();
+}
+async function startRefund(invoice){
+ const balance=remainingAmounts(invoice,data.invoices);
+ if(balance.totalCents<=0)return toast('Esta factura ya está rectificada por completo.');
+ if(draft&&!await confirmAction('Hay un formulario sin terminar. ¿Sustituirlo por la devolución?'))return;
+ draft={...initialDraft(),number:numbered('credit'),kind:'credit',rectifiesId:invoice.id,clientId:invoice.client.id,rate:String(invoice.rate),amountMode:'total',total:(balance.totalCents/100).toFixed(2).replace('.',','),operationDate:invoice.operationDate||invoice.date,description:'Devolución de '+invoice.description,reason:'Devolución del pedido'};
+ page='new';render();readDraft();
+}
+const invoiceHTMLV1=invoiceHTML;
+invoiceHTML=i=>{
+ let html=invoiceHTMLV1(i);
+ if(!issued(i))html=html.replace('<h2>FACTURA</h2>','<h2>BORRADOR</h2>').replace('<section class="invoice-to">','<p class="notice">Borrador · No es una factura emitida</p><section class="invoice-to">');
+ if(i.kind==='credit')html=html.replace('<h2>FACTURA</h2>','<h2 style="font-size:18px">FACTURA<br>RECTIFICATIVA</h2>').replace('<section class="invoice-to">',`<p class="notice">Rectifica la factura ${esc(i.rectifiesNumber)} de ${dateText(i.rectifiesDate)}.<br>Motivo: ${esc(i.reason)}<br>Rectificación por diferencias: devolución del importe indicado.</p><section class="invoice-to">`);
+ return html;
+};
+function documentLabel(i){return i.deletedAt?'En la papelera':!issued(i)?'Borrador':i.kind==='credit'?'Rectificativa':data.invoices.some(c=>c.rectifiesId===i.id&&issued(c))?'Con devolución':i.paid?'Pagada':'Pendiente';}
+detailPage=()=>{
+ const i=data.invoices.find(i=>i.id===selected);if(!i){page='invoices';return listPage();}
+ const related=data.invoices.filter(c=>c.rectifiesId===i.id&&issued(c));
+ return `<header class="top no-print"><div><button class="link" data-nav="invoices">Volver a facturas</button><h1>${!issued(i)?'Borrador':i.kind==='credit'?'Rectificativa':'Factura'} ${esc(i.number)}</h1><span class="pill">${documentLabel(i)}</span></div>${i.deletedAt?'':`<button class="primary" data-action="pdf">${issued(i)?'Descargar PDF':'PDF del borrador'}</button>`}</header>${invoiceHTML(i)}<div class="actions no-print">${i.deletedAt?'<button class="primary" data-action="restore-draft">Recuperar borrador</button>':!issued(i)?'<button class="primary" data-action="edit-draft">Modificar</button><button data-action="trash-draft">Borrar borrador</button><button data-action="issue-draft">Emitir factura</button>':`<button data-action="toggle-paid">${i.kind==='credit'?(i.paid?'Marcar devolución pendiente':'Marcar importe devuelto'):(i.paid?'Marcar pendiente':'Marcar pagada')}</button>${i.kind!=='credit'?'<button data-action="refund">Devolución / rectificar</button><button data-action="duplicate">Duplicar factura</button>':''}`}<button data-action="print">Imprimir</button></div>${related.length?`<section class="card no-print" style="margin-top:20px"><h2>Devoluciones de esta factura</h2>${related.map(c=>`<p><button class="link" data-view="${esc(c.id)}">${esc(c.number)} · ${money(c.totalCents)}</button></p>`).join('')}<p>Importe tras devoluciones: <strong>${money(remainingAmounts(i,data.invoices).totalCents)}</strong></p></section>`:''}<p class="help-line no-print">${issued(i)?'La factura emitida se conserva. Para devolver un importe, crea una rectificativa vinculada.':'Puedes modificar o borrar este borrador antes de emitirlo.'}</p>`;
+};
+listPage=()=>{
+ const list=activeInvoices().filter(issued),net=list.reduce((n,i)=>n+i.totalCents,0),pending=list.filter(i=>i.kind!=='credit'&&!i.paid).reduce((n,i)=>n+remainingAmounts(i,list).totalCents,0);
+ return `<header class="top"><div><h1>Tus facturas</h1><p class="muted">Borradores, facturas y devoluciones.</p></div><button class="primary" data-action="new">+ Nueva factura</button></header><div class="summary no-print"><div class="card"><small>Documentos emitidos</small><strong>${list.length}</strong></div><div class="card"><small>Total neto emitido</small><strong>${money(net)}</strong></div><div class="card"><small>Pendiente de cobro</small><strong>${money(pending)}</strong></div></div><section class="card no-print"><div class="toolbar"><input id="search" aria-label="Buscar facturas" placeholder="Buscar por número, cliente o concepto" value="${esc(filter)}"><select id="status-filter" aria-label="Filtrar documentos" style="width:auto">${[['all','Todos'],['draft','Borradores'],['issued','Emitidas'],['credit','Rectificativas'],['trash','Papelera']].map(([value,label])=>`<option value="${value}" ${statusFilter===value?'selected':''}>${label}</option>`).join('')}</select></div><div id="invoice-list">${invoiceRows()}</div></section>${draft?'<p class="help-line"><button class="link" data-nav="new">Continuar formulario sin terminar</button></p>':''}`;
+};
+invoiceRows=()=>{
+ const list=data.invoices.filter(i=>(statusFilter==='trash'?!!i.deletedAt:!i.deletedAt)&&(statusFilter==='draft'?!issued(i):statusFilter==='issued'?issued(i):statusFilter==='credit'?i.kind==='credit':true)&&`${i.number} ${i.client.name} ${i.description}`.toLocaleLowerCase('es').includes(filter.toLocaleLowerCase('es'))).sort((a,b)=>b.date.localeCompare(a.date)||b.number.localeCompare(a.number,'es',{numeric:true}));
+ if(!list.length)return '<p class="muted">No hay documentos en esta vista.</p>';
+ return `<div class="table-wrap"><table><thead><tr><th>Número</th><th>Cliente</th><th>Fecha</th><th class="right">Total</th><th>Estado</th><th></th></tr></thead><tbody>${list.map(i=>`<tr><td><strong>${esc(i.number)}</strong></td><td>${esc(i.client.name)}</td><td>${dateText(i.date)}</td><td class="right">${money(i.totalCents)}</td><td><span class="pill">${documentLabel(i)}</span></td><td><button class="small" data-view="${esc(i.id)}">${!issued(i)?'Ver / modificar':'Ver / PDF'}</button></td></tr>`).join('')}</tbody></table></div>`;
+};
+const bindV1=bind;
+bind=()=>{
+ bindV1();
+ for(const button of root.querySelectorAll('[data-action]')){
+  const action=button.dataset.action;
+  if(!['edit-draft','trash-draft','restore-draft','issue-draft','refund'].includes(action))continue;
+  button.onclick=async()=>{if(busy)return;const i=data.invoices.find(i=>i.id===selected);try{
+   if(action==='edit-draft')return editSavedDraft(i);
+   if(action==='refund')return startRefund(i);
+   if(action==='trash-draft'&&!await confirmAction('¿Mover este borrador a la papelera? Podrás recuperarlo.'))return;
+   if(action==='issue-draft'&&!await confirmAction('Al emitir, los datos se conservarán. Si hay una devolución, crearás una rectificativa. ¿Emitir factura?'))return;
+   const changed=action==='issue-draft'?{...i,status:'issued',issuedAt:new Date().toISOString()}: {...i,deletedAt:action==='trash-draft'?new Date().toISOString():''};
+   await saveCloud({...data,invoices:data.invoices.map(row=>row.id===i.id?changed:row)});render();toast(action==='trash-draft'?'Borrador en la papelera.':action==='restore-draft'?'Borrador recuperado.':'Factura emitida.');
+  }catch(e){toast(e.message);}};
+ }
+};
 
 let cloud=null,auth=null,currentUser=null,unsubscribe=null,sessionEpoch=0,remoteRevision=0,loading=null;
 function draftKey(){return STORE+'-draft-'+currentUser.uid;}
@@ -105,7 +221,7 @@ async function refreshData(){
  if(ownerValues)for(const [k,v]of Object.entries(ownerValues))if($(k))$(k).value=v;
  toast(ownerValues||page==='new'?'Datos actualizados. Revisa el formulario antes de guardar.':'Datos actualizados.');
 }
-function canRefreshView(){return !busy&&!$('client-dialog').open&&['invoices','clients','detail','backup'].includes(page);}
+function canRefreshView(){return !busy&&!$('client-dialog').open&&!$('confirm-dialog')?.open&&['invoices','clients','detail','backup'].includes(page);}
 async function applyRemote(rev){
  remoteRevision=Math.max(remoteRevision,rev);
  if(rev<=data.revision||!currentUser)return;
@@ -133,12 +249,15 @@ async function logout(){
 }
 async function importBackup(file){
  if(!file)return;
+ const epoch=sessionEpoch;
  try{
   if(file.size>20000000)throw new Error('La copia es demasiado grande.');
   const backup=JSON.parse(await file.text());
+  if(epoch!==sessionEpoch)throw new Error('La sesión ha cambiado. Vuelve a seleccionar la copia.');
   const proposed=mergeBackup(data,backup);
   const added=proposed.invoices.length-data.invoices.length;
-  if(!confirm(`Se añadirán ${added} facturas y los clientes de la copia a tu cuenta de Google. Las facturas guardadas se conservarán. ¿Importar?`))return;
+  if(!await confirmAction(`Se añadirán ${added} facturas y los clientes de la copia a tu cuenta de Google. Las facturas guardadas se conservarán. ¿Importar?`))return;
+  if(epoch!==sessionEpoch)throw new Error('La sesión ha cambiado. Vuelve a seleccionar la copia.');
   await saveCloud(proposed);page='invoices';render();toast('Copia importada y sincronizada.');
  }catch(e){toast(errorText(e));}
 }
@@ -168,7 +287,7 @@ async function initCloud(){
   await a.setPersistence(auth,a.browserLocalPersistence);
   a.onAuthStateChanged(auth,async user=>{
    const epoch=++sessionEpoch;unsubscribe?.();unsubscribe=null;
-   $('client-dialog').close();$('client-dialog').innerHTML='';
+   pendingConfirmation?.();$('client-dialog').close();$('client-dialog').innerHTML='';
    data=blankData();draft=null;selected=null;filter='';statusFilter='all';page='invoices';syncError='';remoteRevision=0;loading=null;
    currentUser=user;cloud=null;
    if(!user){loginPage();return;}
